@@ -15,7 +15,6 @@ class IntersectionEnv(AbstractEnv):
     COLLISION_REWARD: float = -5
     HIGH_SPEED_REWARD: float = 1
     ARRIVED_REWARD: float = 1
-
     ACTIONS: Dict[int, str] = {
         0: 'SLOWER',
         1: 'IDLE',
