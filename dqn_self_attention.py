@@ -25,7 +25,7 @@ import datetime
 
 from highway_env.envs.intersection_env import IntersectionEnv
 
-from models import EgoAttentionNetwork
+from models_eshagh import EgoAttentionNetwork
 
 
 if __name__ == "__main__":
@@ -49,7 +49,7 @@ if __name__ == "__main__":
                         help='run the script in production mode and use wandb to log outputs')
     parser.add_argument('--capture-video', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True,
                         help='weather to capture videos of the agent performances (check out `videos` folder)')
-    parser.add_argument('--wandb-project-name', type=str, default="highway-env",
+    parser.add_argument('--wandb-project-name', type=str, default="Intersectionenv_",
                         help="the wandb's project name")
     parser.add_argument('--wandb-entity', type=str, default=None,
                         help="the entity (team) of wandb's project")
@@ -137,8 +137,7 @@ if args.prod_mode and TRAIN:
 
 # TRY NOT TO MODIFY: seeding
 device = torch.device('cuda' if torch.cuda.is_available() and args.cuda else 'cpu')
-device = 'cpu'
-
+device='cpu'
 ##------------------- configs -------------------------
 env_config = {
     "id": "intersection-v0",
@@ -249,7 +248,7 @@ model_config = {
         "reshape": False,
     },
     # "heads": 2,
-    # "dropout_factor": 0
+    "dropout_factor": 0,
     "out": output_size
 
 }
@@ -263,9 +262,8 @@ optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
 
 loss_fn = nn.MSELoss()
 
-#print(device.__repr__())
-#print(q_network)
-
+print(device.__repr__())
+print(q_network)
 if not os.path.exists(models_path):
     os.mkdir(models_path)
 
@@ -273,7 +271,8 @@ if TRAIN:
     # TRY NOT TO MODIFY: start the game
     obs = env.reset()
     episode_reward = 0
-
+    #print(obs)
+    #time.sleep(10)
     best_reward = -np.inf
 
     for global_step in range(args.total_timesteps):
@@ -281,28 +280,39 @@ if TRAIN:
         eps_duration = args.exploration_fraction*args.total_timesteps
         # eps_duration = 2000
         epsilon = linear_schedule(args.start_e, args.end_e, eps_duration, global_step)
-        epsilon = 0.05
+        #epsilon = 0.05
         if random.random() < epsilon:
             action = env.action_space.sample()
         else:
-            logits = q_network.forward(obs.reshape((1,)+obs.shape))
+            #print('START')
+            #print(obs.reshape((1,)+obs.shape))
+            #print('END')
+            logits, att_matrix, selfatt_matrix = q_network.forward(obs.reshape((1,)+obs.shape))
             action = torch.argmax(logits, dim=1).tolist()[0]
-
+            print(att_matrix)
+            print(selfatt_matrix)
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, reward, done, _ = env.step(action)
-        # env.render()
+        env.render()
+        #print(next_obs)
+        #time.sleep(10)
         episode_reward += reward
+
 
         # ALGO LOGIC: training.
         # put data collected with all agents into one common buffer
         rb.put((obs, action, reward, next_obs, done))
 
+
         if global_step > args.learning_starts and global_step % args.train_frequency == 0:
             s_obs, s_actions, s_rewards, s_next_obses, s_dones = rb.sample(args.batch_size)
+
             with torch.no_grad():
-                target_max = torch.max(target_network.forward(s_next_obses), dim=1)[0]
+                var1 , var2, var6 = target_network.forward(s_next_obses)
+                target_max = torch.max(var1, dim=1)[0]
                 td_target = torch.Tensor(s_rewards).to(device) + args.gamma * target_max * (1 - torch.Tensor(s_dones).to(device))
-            old_val = q_network.forward(s_obs).gather(1, torch.LongTensor(s_actions).view(-1,1).to(device)).squeeze()
+            var3, _, _ = q_network.forward(s_obs)
+            old_val = var3.gather(1, torch.LongTensor(s_actions).view(-1,1).to(device)).squeeze()
             loss = loss_fn(td_target, old_val)
 
             if global_step % 100 == 0:
@@ -315,8 +325,8 @@ if TRAIN:
             optimizer.step()
 
             # save model each time
-            torch.save(q_network.state_dict(), models_path + "/q_network.pt")
-
+            torch.save(q_network.state_dict(), models_path + "/q_network_4_3_2_rew1.pt")
+            torch.save(q_network.state_dict(), "/u/05/aznarr1/unix/Documents/Projectintersection/highway-env-master/model" + "/q_network_4_3_2_rew1.pt")
             # save best model
             if episode_reward > best_reward:
                 best_reward = episode_reward
@@ -328,13 +338,22 @@ if TRAIN:
 
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
-
         if done: #if one agent is done - reset env
             # TRY NOT TO MODIFY: record rewards for plotting purposes
             print(f"global_step={global_step}, episode_reward={episode_reward}")
             writer.add_scalar("charts/episode_reward", episode_reward, global_step)
             writer.add_scalar("charts/epsilon", epsilon, global_step)
+            if reward==-5:
+                writer.add_scalar("charts/collision", 1, global_step)
+            else:
+                writer.add_scalar("charts/collision", 0, global_step)
+            if env.has_arrived==True:
+                writer.add_scalar("charts/arrived", 1, global_step)
+            else:
+                writer.add_scalar("charts/arrived", 0, global_step)
             obs, episode_reward = env.reset(), 0
+
+
 
     env.close()
     writer.close()
@@ -344,17 +363,18 @@ else: #test
     obs = env.reset()
     episode_reward = 0
 
-    load_path = '/u/05/aznarr1/unix/Documents/Projectintersection/highway-env-master/scripts/data/2020_11_22/Intersection_dqn_ego_attention_1_12:47:50/models'
+    load_path = "/u/05/aznarr1/unix/Documents/Projectintersection/highway-env-master/model"
     q_network.load_state_dict(torch.load(load_path + "/q_network.pt"))
 
-    for _ in range(10):
+    for _ in range(50):
         while True:
-            logits = q_network.forward(obs.reshape((1,)+obs.shape))
+            logits,att_matrix, _ = q_network.forward(obs.reshape((1,)+obs.shape))
             action = torch.argmax(logits, dim=1).tolist()[0]
-
             # TRY NOT TO MODIFY: execute the game and log data.
             next_obs, reward, done, _ = env.step(action)
             env.render()
+            print('here')
+            #time.sleep(1)
             episode_reward += reward
 
             # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
